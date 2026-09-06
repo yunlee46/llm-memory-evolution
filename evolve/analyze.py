@@ -36,7 +36,7 @@ def write_report(run_dir: Path) -> Path:
         out.append(f"| {g} | {sum(fs)/len(fs):.3f} | {max(fs):.3f} | {min(fs):.3f} | {sum(tk)/len(tk):.0f} | "
                    f"{best['id']} | {best.get('mean_completion_tokens', 0):.0f} | {best['operator'][:40]} |")
 
-    out.append("\n## Per-check pass rate (population mean) per generation\n")
+    out.append("\n## Per-check mean score (population mean) per generation\n")
     names = sorted({n for pop in gens for i in pop for n in i["check_rates"]})
     out.append("| check | " + " | ".join(f"g{g}" for g in range(len(gens))) + " |")
     out.append("|---|" + "---|" * len(gens))

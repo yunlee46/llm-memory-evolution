@@ -35,6 +35,12 @@ Columns (both frames unless noted; NaN means unknown):
                      float contracts traded before the snapshot
   home_score, away_score, home_win
                      int   TRAIN ONLY. Not present in test.
+  home_hits, home_hr, home_bb, home_so, home_lob, home_err, home_pitchers, home_er
+  away_hits, away_hr, away_bb, away_so, away_lob, away_err, away_pitchers, away_er
+                     float TRAIN ONLY box-score totals for that team in that game:
+                           hits, home runs, walks, strikeouts (batting); left on
+                           base; errors (fielding); pitchers used and earned runs
+                           allowed (pitching). NaN for a few games.
 
 Rules:
 - Rows are in chronological order and every test row is later than every
@@ -52,11 +58,14 @@ Rules:
   identical outputs.
 - Handle missing values: any column may contain NaN, strings may be empty, and
   the market columns are NaN for most of the training history.
-- Predictions are scored by log-loss and calibration against the outcomes and
-  by the profit of a fixed rule that buys a contract on the exchange whenever
-  your probability exceeds its ask price by a margin, paying the exchange
-  fee. Being confident and wrong is expensive; copying the market exactly
-  earns nothing.
+- Predictions are scored on several months of games pooled together: by
+  log-loss and calibration against the outcomes, by a paired per-game
+  comparison of your log-loss with the exchange price, and by the profit of a
+  fixed rule that buys a contract on the exchange whenever your probability
+  exceeds its ask price by a margin, paying the exchange fee. Profit is judged
+  by its t-statistic, so a lucky streak on a few bets counts for little and a
+  consistent small edge counts for a lot. Being confident and wrong is
+  expensive; copying the market exactly earns nothing from the betting rule.
 
 Respond with the complete model.py inside a single ```python code block and
 nothing else.

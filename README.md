@@ -10,11 +10,12 @@ pre-game contract prices.
    model (`models.builder`). The user prompt is always `tasks/mlb_kalshi/spec.md`, which asks for a
    single `model.py` exposing `predict(train, test) -> P(home wins)`.
 2. Each candidate `model.py` runs in a sandboxed subprocess (network disabled, wall-clock timeout,
-   CPU limit) on walk-forward folds of real games. Its probabilities are scored by 19 weighted
-   checks: gates (parses, allowed imports, runs, deterministic, valid probabilities), skill
-   (log-loss/Brier vs a naive baseline and vs the Kalshi market, calibration), and a fixed
-   betting rule (quarter-Kelly against the Kalshi ask, paying the taker fee) that must be
-   profitable with a bounded drawdown.
+   CPU limit) on walk-forward folds of real games. Its probabilities are scored by 17 weighted
+   checks: binary gates (parses, allowed imports, runs, deterministic, valid probabilities) and
+   graded quality checks with partial credit: share of the market's log-loss skill captured, a
+   paired t-test against the Kalshi price, calibration, and a fixed betting rule (quarter-Kelly
+   against the Kalshi ask, paying the taker fee) whose profit is judged by its t-statistic so luck
+   on a few hundred bets earns little.
 3. Fitness = mean check score over `samples_per_eval` builds, minus a lint penalty that stops the
    instruction file from smuggling in the solution (long code blocks, domain keywords, length).
    Ties break toward fewer output tokens.
@@ -40,28 +41,34 @@ python -m tasks.mlb_kalshi.fetch_data              # ~10-20 min the first time
 python -m tasks.mlb_kalshi.fetch_data --stage build  # rebuild folds from cached raw data
 ```
 
-Sources: Retrosheet game logs 2005-2025 (outcomes, starters), MLB Stats API (2026 outcomes,
-probable pitchers), sportsbookreviewsonline closing moneylines 2010-2021 (optional training
-feature), and Kalshi `KXMLBGAME` settled markets with the last hourly candle before first pitch
-(April 2025 onward). Output: `tasks/mlb_kalshi/data/games.parquet` plus walk-forward fold files.
+Sources: Retrosheet game logs 2005-2025 (outcomes, starters, per-team box-score totals), MLB Stats
+API (2026 outcomes, probable pitchers, box scores), sportsbookreviewsonline closing moneylines
+2010-2021 (optional training feature), and Kalshi `KXMLBGAME` settled markets with the last hourly
+candle before first pitch (April 2025 onward). Output: `tasks/mlb_kalshi/data/games.parquet` plus
+walk-forward fold files. Train frames carry sixteen train-only box-score columns (hits, HR, walks,
+strikeouts, LOB, errors, pitchers used, earned runs for each side) so a model can build run-differential
+or starter-quality features; test frames have every outcome column physically removed.
+`--stage outcomes` re-parses the cached game logs and box scores without touching the Kalshi cache.
 
 **Kalshi data stays on your machine.** Kalshi's data terms forbid redistribution and model
 training on archived market data; the `data/` directory is gitignored for that reason.
 Retrosheet: "The information used here was obtained free of charge from and is copyrighted by
 Retrosheet. Interested parties may contact Retrosheet at www.retrosheet.org."
 
-## Calibration (2026-09-06, all 9 folds)
+## Calibration (2026-09-06, all 9 folds, graded fitness)
 
 | artifact | score | note |
 |---|---|---|
-| `reference/model.py` | 0.72 | tracks the Kalshi mid almost exactly (log-loss 0.6802 vs market 0.6801), so it never finds a 2% edge and places no bets |
-| first real DeepSeek build | 0.52 | bets on 80% of games, ROI −3.3% (roughly the fee), log-loss well behind the market |
+| `reference/model.py` | 0.67 | tracks the Kalshi mid (log-loss 0.6802 vs market 0.6801, captures 99% of the market's skill over naive), never finds a 2% edge, so earns nothing from the six betting weights |
+| first-run winner, build 1 (gradient boosting on market + encodings) | 0.76 | captures 73% of market skill, ECE 0.008, bets 54% of games at ROI −1.4% (t = −0.5) |
+| first-run winner, build 0 (logistic on rolling win rates) | 0.65 | log-loss worse than the naive rate (t = −5.2 vs market) yet ROI +1.8% on 3008 bets (t = +0.8): the profit check gives that under half credit |
 | `reference/broken.py` | 0.16 | crashes reading the outcome column |
 
 The Kalshi MLB market is efficient against Elo, starter form and team form: every blend that
-deviates from the market enough to bet loses about the fee. The seven betting/market checks
-(weight 8 of 26) are therefore the open frontier the evolution is pushing on, and 0.72 is the
-"honest market-tracking" baseline, not a ceiling.
+deviates from the market enough to bet loses about the fee. Under the old pass/fail checks the
+same two winner builds scored 0.76 and 0.84 on the untouched holdout with their ROI signs flipped
+relative to the evaluation folds; under the graded checks both score 0.74. The betting weights
+(8 of 26) remain the open frontier, but a model can no longer collect them by luck.
 
 ## Run
 
@@ -90,19 +97,23 @@ python -m evolve.fitness --folds holdout runs/<id>/gen_05/<best>/sample_0.py   #
   Test files have the outcome columns physically removed. This stops honest mistakes and casual
   cheating, not a determined adversary.
 
-| check | weight | passes when |
+| check | weight | credit |
 |---|---|---|
-| syntax_ok, imports_allowed, defines_predict | 1 each | static AST checks |
-| runs_ok | 3 | sandbox finishes within `timeout_s` without error |
-| no_network, output_shape, probs_valid, deterministic | 1 each | gates |
-| not_degenerate | 1 | std(p) > 0.03 |
-| logloss_beats_naive / brier_beats_naive | 2 / 1 | beats constant home-win rate by margin |
-| logloss_near_market / logloss_beats_market | 2 / 1 | within 0.005 of / better than the Kalshi mid |
-| calibration_ece | 2 | 10-bin ECE < 0.05 |
-| min_bets | 1 | bets on ≥ 10% of priced games |
-| roi_positive / roi_stretch | 2 / 1 | ROI > 0 / > 3% after fees |
-| max_drawdown | 1 | worst drawdown < 10% of total turnover |
-| no_fold_disaster | 1 | no single fold has ROI below −10% |
+| syntax_ok, imports_allowed, defines_predict | 1 each | static AST checks (binary) |
+| runs_ok | 3 | sandbox finishes within `timeout_s` without error (binary) |
+| no_network, output_shape, probs_valid, deterministic | 1 each | gates (binary) |
+| not_degenerate | 1 | std(p) > 0.03 (binary) |
+| skill_vs_naive | 3 | share of the market's log-loss improvement over the constant home-win rate that the model captures, on market-priced rows (0 = naive, 1 = market) |
+| skill_vs_market | 3 | sigmoid of the paired per-game log-loss t-statistic vs the Kalshi mid: 0.5 = indistinguishable, 0.88 at t = +2 |
+| calibration | 2 | 1 − ECE / (2 × `ece_max`): full at 0, half at 0.05 |
+| bet_coverage | 1 | bets / (`min_bet_frac` × priced games), capped at 1 |
+| roi_tstat | 3 | sigmoid(t − `roi_t_half`) of per-bet profit after fees; 0 below `min_bets_abs` bets |
+| drawdown | 1 | 1 − dd / (2 × `max_drawdown`), dd as a fraction of turnover; 0 below `min_bets_abs` bets |
+| fold_consistency | 1 | mean over bet folds of (ROI − `fold_disaster`) / −`fold_disaster`, clipped to [0, 1] |
+
+All quality metrics are pooled over the `folds_per_eval` folds of that generation (four by default,
+roughly 1,600 games), and a check's `passed` flag means at least half credit. `evolve.fitness`
+prints the fractional credit for graded checks and PASS/FAIL for gates.
 
 ## Layout
 
