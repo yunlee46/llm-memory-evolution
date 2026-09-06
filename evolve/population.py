@@ -22,7 +22,12 @@ class Individual:
     lint_penalty: float = 0.0
     lint_reasons: list[str] = field(default_factory=list)
     check_rates: dict[str, float] = field(default_factory=dict)
+    mean_completion_tokens: float = 0.0
     samples: list[dict[str, Any]] = field(default_factory=list)
+
+    def rank_key(self) -> tuple[float, float]:
+        """Fitness first; fewer builder output tokens break ties."""
+        return (self.fitness or 0.0, -self.mean_completion_tokens)
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -34,11 +39,11 @@ class Individual:
 
 def tournament(pop: list[Individual], k: int, rng: random.Random) -> Individual:
     contestants = rng.sample(pop, min(k, len(pop)))
-    return max(contestants, key=lambda i: i.fitness or 0.0)
+    return max(contestants, key=lambda i: i.rank_key())
 
 
 def ranked(pop: list[Individual]) -> list[Individual]:
-    return sorted(pop, key=lambda i: (i.fitness or 0.0, i.test_score or 0.0), reverse=True)
+    return sorted(pop, key=lambda i: i.rank_key(), reverse=True)
 
 
 async def next_generation(pop: list[Individual], gen: int, llm: LLM, cfg: dict[str, Any],

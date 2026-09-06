@@ -37,12 +37,12 @@ def build_messages(md: str, spec: str) -> list[dict[str, str]]:
     return msgs
 
 
-async def build(llm: LLM, cfg: dict[str, Any], md: str, spec: str) -> tuple[str, str]:
-    """Returns (html, raw_reply)."""
+async def build(llm: LLM, cfg: dict[str, Any], md: str, spec: str) -> tuple[str, str, int]:
+    """Returns (html, raw_reply, completion_tokens)."""
     mc = cfg["models"]
-    reply = await llm.chat(mc["builder"], build_messages(md, spec),
-                           temperature=mc.get("builder_temperature"), max_tokens=mc.get("builder_max_tokens"))
-    return extract_html(reply), reply
+    reply, _, ct = await llm.chat_ex(mc["builder"], build_messages(md, spec),
+                                     temperature=mc.get("builder_temperature"), max_tokens=mc.get("builder_max_tokens"))
+    return extract_html(reply), reply, ct
 
 
 def main(argv: list[str]) -> None:
@@ -58,12 +58,12 @@ def main(argv: list[str]) -> None:
     cfg = load_config(args.config)
     llm = LLM(cfg, mock=args.mock)
     md = Path(args.md).read_text()
-    html, raw = asyncio.run(build(llm, cfg, md, load_spec(cfg)))
+    html, raw, ct = asyncio.run(build(llm, cfg, md, load_spec(cfg)))
     out = Path(args.out) if args.out else ROOT / "runs" / "adhoc" / (Path(args.md).stem + ".html")
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(html)
     out.with_suffix(".reply.txt").write_text(raw)
-    print(f"wrote {out} ({len(html)} chars); usage {llm.usage.to_dict()}")
+    print(f"wrote {out} ({len(html)} chars); completion tokens {ct}")
     if not args.no_score:
         from .fitness import evaluate_html
 

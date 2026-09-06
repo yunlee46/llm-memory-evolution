@@ -61,12 +61,15 @@ class LLM:
         return f"---BEGIN---\n{body}\n\n<!-- mock-mutated {int(time.time() * 1000) % 100000} -->\n---END---"
 
     # -------------------------------------------------------------- calls
-    async def chat(self, model: str, messages: list[dict[str, str]], temperature: float | None = None,
-                   max_tokens: int | None = None) -> str:
+    async def chat_ex(self, model: str, messages: list[dict[str, str]], temperature: float | None = None,
+                      max_tokens: int | None = None) -> tuple[str, int, int]:
+        """Returns (text, prompt_tokens, completion_tokens)."""
         if self.mock:
             await asyncio.sleep(0.01)
-            self.usage.add(model, 0, 0)
-            return self._mock_reply(model, messages)
+            text = self._mock_reply(model, messages)
+            ct = len(text) // 4
+            self.usage.add(model, 0, ct)
+            return text, 0, ct
         kwargs: dict[str, Any] = {"model": model, "messages": messages}
         if temperature is not None:
             kwargs["temperature"] = temperature
@@ -84,8 +87,15 @@ class LLM:
                     print(f"[llm] {model}: {type(e).__name__}: {str(e)[:100]} — retry in {wait}s", file=sys.stderr)
                     await asyncio.sleep(wait)
         u = resp.usage
-        self.usage.add(model, getattr(u, "prompt_tokens", 0) or 0, getattr(u, "completion_tokens", 0) or 0)
-        return resp.choices[0].message.content or ""
+        pt = getattr(u, "prompt_tokens", 0) or 0
+        ct = getattr(u, "completion_tokens", 0) or 0
+        self.usage.add(model, pt, ct)
+        return resp.choices[0].message.content or "", pt, ct
+
+    async def chat(self, model: str, messages: list[dict[str, str]], temperature: float | None = None,
+                   max_tokens: int | None = None) -> str:
+        text, _, _ = await self.chat_ex(model, messages, temperature, max_tokens)
+        return text
 
     def chat_sync(self, *args, **kwargs) -> str:
         return asyncio.run(self.chat(*args, **kwargs))

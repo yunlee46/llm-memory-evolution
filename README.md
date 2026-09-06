@@ -12,11 +12,16 @@ test suite.
    diverse styles including an empty control).
 2. **Evaluation**: each file becomes the system prompt for one chat call to the
    builder model; the user message is `tasks/cat_bounce/spec.md`. The reply's
-   `index.html` is scored by 12 behavioural Playwright checks (gravity, floor
-   bounce, drag and throw with momentum, "make it rain", resize recolour, no
-   network, no console errors, accessibility). Each file is built 3 times and
-   fitness is the mean score, minus lint penalties for files that try to
-   smuggle the solution in (long code blocks, task keywords, over 1500 words).
+   `index.html` is scored by 21 behavioural Playwright checks: gravity, bounces
+   that lose energy, settling within the deadline, wall bounds, no cat overlap,
+   drag-follow and throw with force-scaled momentum, a live "Cats: N" counter,
+   make-it-rain by button and Space key, double-click removal, pause/resume
+   that really freezes the stage, reset, localStorage persistence across
+   reload, resize recolour, no network, no console errors, accessibility.
+   Each file is built 3 times and fitness is the mean score, minus lint
+   penalties for files that try to smuggle the solution in (long code blocks,
+   task keywords, over 1500 words). Ties in fitness are broken by fewer
+   builder output tokens, so terser correct output wins.
 3. **Next generation**: top 2 carried over unchanged, then 4 children by
    section-level crossover (with a 10% per-section blind rewrite), 2 by an
    *informed* rewrite that sees a random half of the parent's check results,

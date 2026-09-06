@@ -50,11 +50,13 @@ async def evaluate_population(pop: list[Individual], gen_dir: Path, llm: LLM, cf
         d = gen_dir / ind.id
         d.mkdir(parents=True, exist_ok=True)
         out = d / f"sample_{s}.html"
-        if out.exists():
+        meta = d / f"sample_{s}.meta.json"
+        if out.exists() and meta.exists():
             return out
-        html, raw = await build(llm, cfg, ind.md, spec)
+        html, raw, ct = await build(llm, cfg, ind.md, spec)
         out.write_text(html)
         (d / f"sample_{s}.reply.txt").write_text(raw)
+        meta.write_text(json.dumps({"completion_tokens": ct}))
         return out
 
     for ind in pop:
@@ -75,7 +77,13 @@ async def evaluate_population(pop: list[Individual], gen_dir: Path, llm: LLM, cf
         by_ind[ind.id].append(r)
     for ind in pop:
         rs = by_ind[ind.id]
-        ind.samples = [r.to_dict() for r in rs]
+        toks = []
+        for s in range(n_samples):
+            meta = gen_dir / ind.id / f"sample_{s}.meta.json"
+            if meta.exists():
+                toks.append(json.loads(meta.read_text()).get("completion_tokens", 0))
+        ind.mean_completion_tokens = round(sum(toks) / len(toks), 1) if toks else 0.0
+        ind.samples = [dict(r.to_dict(), completion_tokens=(toks[i] if i < len(toks) else None)) for i, r in enumerate(rs)]
         ind.test_score = round(sum(r.score for r in rs) / len(rs), 4)
         names = {c.name for r in rs for c in r.checks}
         ind.check_rates = {n: round(sum(1 for r in rs for c in r.checks if c.name == n and c.passed) / len(rs), 3)
@@ -87,11 +95,11 @@ async def evaluate_population(pop: list[Individual], gen_dir: Path, llm: LLM, cf
 
 def print_generation(gen: int, pop: list[Individual]) -> None:
     t = Table(title=f"Generation {gen}")
-    for col in ("id", "fitness", "tests", "lint", "operator", "parents", "words"):
+    for col in ("id", "fitness", "tests", "lint", "out tok", "operator", "parents", "words"):
         t.add_column(col)
     for ind in ranked(pop):
         t.add_row(ind.id, f"{ind.fitness:.3f}", f"{ind.test_score:.3f}", f"-{ind.lint_penalty:.2f}" if ind.lint_penalty else "",
-                  ind.operator[:40], ",".join(ind.parents), str(len(ind.md.split())))
+                  f"{ind.mean_completion_tokens:.0f}", ind.operator[:40], ",".join(ind.parents), str(len(ind.md.split())))
     console.print(t)
 
 

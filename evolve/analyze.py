@@ -27,12 +27,14 @@ def write_report(run_dir: Path) -> Path:
         return run_dir / "report.md"
 
     out.append("## Fitness per generation\n")
-    out.append("| gen | mean | max | min | best id | best operator |")
-    out.append("|---|---|---|---|---|---|")
+    out.append("| gen | mean | max | min | mean out tokens | best id | best out tokens | best operator |")
+    out.append("|---|---|---|---|---|---|---|---|")
     for g, pop in enumerate(gens):
         fs = [i["fitness"] for i in pop]
-        best = max(pop, key=lambda i: i["fitness"])
-        out.append(f"| {g} | {sum(fs)/len(fs):.3f} | {max(fs):.3f} | {min(fs):.3f} | {best['id']} | {best['operator'][:40]} |")
+        tk = [i.get("mean_completion_tokens", 0) for i in pop]
+        best = max(pop, key=lambda i: (i["fitness"], -i.get("mean_completion_tokens", 0)))
+        out.append(f"| {g} | {sum(fs)/len(fs):.3f} | {max(fs):.3f} | {min(fs):.3f} | {sum(tk)/len(tk):.0f} | "
+                   f"{best['id']} | {best.get('mean_completion_tokens', 0):.0f} | {best['operator'][:40]} |")
 
     out.append("\n## Per-check pass rate (population mean) per generation\n")
     names = sorted({n for pop in gens for i in pop for n in i["check_rates"]})
@@ -86,9 +88,11 @@ def write_report(run_dir: Path) -> Path:
     for r, c in cnt.most_common():
         out.append(f"- {r}: ancestor of {c}/{len(last)} final individuals")
 
-    best_overall = max((i for pop in gens for i in pop), key=lambda i: (i["fitness"], i["generation"]))
+    best_overall = max((i for pop in gens for i in pop),
+                       key=lambda i: (i["fitness"], -i.get("mean_completion_tokens", 0), i["generation"]))
     out.append(f"\n## Best individual overall: `{best_overall['id']}` fitness {best_overall['fitness']:.3f} "
-               f"(tests {best_overall['test_score']:.3f}, lint -{best_overall['lint_penalty']:.2f})\n")
+               f"(tests {best_overall['test_score']:.3f}, lint -{best_overall['lint_penalty']:.2f}, "
+               f"mean output tokens {best_overall.get('mean_completion_tokens', 0):.0f})\n")
     if best_overall["lint_reasons"]:
         out.append("Lint: " + "; ".join(best_overall["lint_reasons"]) + "\n")
     out.append("```markdown\n" + best_overall["md"].strip() + "\n```\n")
