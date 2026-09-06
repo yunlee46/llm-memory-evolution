@@ -1,7 +1,9 @@
-"""Fitness = weighted Playwright check pass rate on a built index.html, minus MD lint penalties.
+"""Fitness = weighted check pass rate on a built artifact, minus MD lint penalties.
 
 Task folders are pluggable: tasks/<name>/tests/checks.py must expose
-    run(browser, url, cfg) -> list[CheckResult]
+    run(ctx, artifact_path: Path, fitness_cfg) -> list[CheckResult]
+and may expose setup_worker(fitness_cfg) -> ctx / teardown_worker(ctx) for per-thread resources
+(a browser, loaded datasets, ...).
 """
 from __future__ import annotations
 
@@ -51,49 +53,54 @@ def score_checks(checks: list[CheckResult]) -> float:
     return round(sum(c.weight for c in checks if c.passed) / total, 4)
 
 
-def evaluate_html(html_path: Path, cfg: dict[str, Any], browser=None) -> EvalResult:
-    """Evaluate a single built page. Creates its own browser unless one is passed in."""
-    from playwright.sync_api import sync_playwright
+def _worker_ctx(mod, fcfg):
+    return mod.setup_worker(fcfg) if hasattr(mod, "setup_worker") else None
 
+
+def _worker_close(mod, ctx):
+    if ctx is not None and hasattr(mod, "teardown_worker"):
+        mod.teardown_worker(ctx)
+
+
+def evaluate_artifact(path: Path, cfg: dict[str, Any], ctx=None, mod=None) -> EvalResult:
+    """Evaluate one built artifact. Creates (and tears down) its own worker context unless one is passed in."""
     task_dir = ROOT / cfg["task"]
-    mod = load_checks_module(task_dir)
-    url = html_path.resolve().as_uri()
+    mod = mod or load_checks_module(task_dir)
     fcfg = cfg.get("fitness", {})
-
-    def _run(b):
-        checks = mod.run(b, url, fcfg)
-        return EvalResult(score=score_checks(checks), checks=checks)
-
+    own = ctx is None
     try:
-        if browser is not None:
-            return _run(browser)
-        with sync_playwright() as p:
-            b = p.chromium.launch(headless=fcfg.get("headless", True))
-            try:
-                return _run(b)
-            finally:
-                b.close()
-    except Exception as e:  # a crashing page is a fitness of 0, not a harness failure
+        if own:
+            ctx = _worker_ctx(mod, fcfg)
+        try:
+            checks = mod.run(ctx, Path(path).resolve(), fcfg)
+            return EvalResult(score=score_checks(checks), checks=checks)
+        finally:
+            if own:
+                _worker_close(mod, ctx)
+    except Exception as e:  # a crashing artifact is a fitness of 0, not a harness failure
         return EvalResult(score=0.0, error=f"{type(e).__name__}: {e}")
 
 
-def evaluate_many(paths: list[Path], cfg: dict[str, Any], workers: int | None = None) -> list[EvalResult]:
-    """Evaluate several pages in parallel; each worker thread owns its own browser."""
-    from playwright.sync_api import sync_playwright
+evaluate_html = evaluate_artifact  # backwards-compatible name
 
+
+def evaluate_many(paths: list[Path], cfg: dict[str, Any], workers: int | None = None) -> list[EvalResult]:
+    """Evaluate several artifacts in parallel; each worker thread owns one task context."""
     workers = workers or cfg.get("fitness", {}).get("workers", 3)
     if not paths:
         return []
+    task_dir = ROOT / cfg["task"]
+    mod = load_checks_module(task_dir)
+    fcfg = cfg.get("fitness", {})
 
     def worker(chunk: list[Path]) -> list[EvalResult]:
         out = []
-        with sync_playwright() as p:
-            b = p.chromium.launch(headless=cfg.get("fitness", {}).get("headless", True))
-            try:
-                for path in chunk:
-                    out.append(evaluate_html(path, cfg, browser=b))
-            finally:
-                b.close()
+        ctx = _worker_ctx(mod, fcfg)
+        try:
+            for path in chunk:
+                out.append(evaluate_artifact(path, cfg, ctx=ctx, mod=mod))
+        finally:
+            _worker_close(mod, ctx)
         return out
 
     n = min(workers, len(paths))
@@ -141,16 +148,22 @@ def md_lint(md: str, cfg: dict[str, Any]) -> tuple[float, list[str]]:
 def main(argv: list[str]) -> None:
     import argparse
 
-    ap = argparse.ArgumentParser(description="Score one or more built html files")
-    ap.add_argument("html", nargs="+")
+    ap = argparse.ArgumentParser(description="Score one or more built artifacts (model.py / index.html)")
+    ap.add_argument("artifact", nargs="+")
     ap.add_argument("--config", default="config.yaml")
-    ap.add_argument("--headed", action="store_true")
+    ap.add_argument("--folds", default=None, help="mlb task: all | holdout | comma list of fold ids (default: rotation for --generation)")
+    ap.add_argument("--generation", type=int, default=0, help="which generation's fold rotation to use")
+    ap.add_argument("--headed", action="store_true", help="browser tasks: show the browser")
     args = ap.parse_args(argv)
     cfg = load_config(args.config)
+    fc = cfg.setdefault("fitness", {})
+    fc["generation"] = args.generation
+    if args.folds:
+        fc["folds"] = args.folds
     if args.headed:
-        cfg.setdefault("fitness", {})["headless"] = False
-    for h in args.html:
-        r = evaluate_html(Path(h), cfg)
+        fc["headless"] = False
+    for h in args.artifact:
+        r = evaluate_artifact(Path(h), cfg)
         print(f"\n{h}: score={r.score}" + (f"  ERROR {r.error}" if r.error else ""))
         for c in r.checks:
             print(f"  {'PASS' if c.passed else 'FAIL'} {c.name:<24} w={c.weight:<3} {c.detail}")

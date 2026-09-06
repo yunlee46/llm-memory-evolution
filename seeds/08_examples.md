@@ -1,17 +1,24 @@
 # Patterns that work
 
-Use a time-based animation loop so behaviour is consistent regardless of frame rate:
+Fix every source of randomness and pin the estimator so repeated runs agree:
 
-```js
-let last = performance.now();
-function tick(now) { const dt = Math.min((now - last) / 1000, 0.05); last = now; update(dt); requestAnimationFrame(tick); }
-requestAnimationFrame(tick);
+```python
+np.random.seed(0)
+clf = LogisticRegression(C=1.0, max_iter=500, random_state=0)
 ```
 
-Attach pointer handlers for the whole drag lifecycle, tracking velocity from the last few pointer positions so a release can inherit momentum:
+Build features with explicit handling of missing values rather than letting them propagate:
 
-```js
-el.addEventListener('mousedown', start); window.addEventListener('mousemove', move); window.addEventListener('mouseup', end);
+```python
+x = pd.to_numeric(df["some_column"], errors="coerce")
+has = x.notna().astype(float)
+x = x.fillna(x.median() if x.notna().any() else 0.0)
 ```
 
-Keep objects inside their container by clamping position and reflecting velocity when a boundary is crossed. Guard DOM lookups and register `resize` listeners on `window`.
+Clip the final output away from the boundaries so a confident miss is survivable:
+
+```python
+return np.clip(p.astype(np.float64), 0.02, 0.98)
+```
+
+Compute sequential statistics in date order and freeze them at the end of the training rows; never update them with anything from the rows you are predicting.

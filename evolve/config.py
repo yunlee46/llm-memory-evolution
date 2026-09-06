@@ -18,6 +18,10 @@ def load_config(path: str | Path = "config.yaml") -> dict[str, Any]:
     with open(p) as f:
         cfg = yaml.safe_load(f)
     cfg["_path"] = str(p)
+    meta_path = ROOT / cfg.get("task", "") / "task.yaml"
+    meta = yaml.safe_load(meta_path.read_text()) if meta_path.exists() else {}
+    cfg["task_meta"] = meta or {}
+    cfg.setdefault("artifact", cfg["task_meta"].get("artifact") or {"filename": "index.html", "lang": "html"})
     return cfg
 
 

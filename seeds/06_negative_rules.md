@@ -1,9 +1,10 @@
 # Do not
-- Do not load anything from the network: no CDN scripts, fonts, images or stylesheets.
+- Do not access the network, read or write files, or start processes.
 - Do not rename, misspell or omit any identifier the task specifies.
-- Do not use frameworks or build steps.
+- Do not use libraries the task does not allow.
 - Do not leave placeholders, TODOs or truncated sections.
 - Do not wrap the deliverable in explanation.
-- Do not use animation techniques that depend on frame rate; use elapsed time.
-- Do not let interactive objects escape their container.
-- Do not throw on load; guard every DOM lookup.
+- Do not fit on rows you are asked to predict, and do not use anything derived from their outcomes.
+- Do not leave a random seed unset.
+- Do not return values outside the required range, and never return NaN or infinity.
+- Do not crash on missing values, empty strings or categories absent from the training data.

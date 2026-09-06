@@ -40,6 +40,8 @@ class LLM:
     def __init__(self, cfg: dict[str, Any], mock: bool = False):
         self.cfg = cfg["models"]
         self.mock = mock
+        self.mock_reply_path = cfg.get("task_meta", {}).get("mock_reply", "tasks/cat_bounce/reference/index.html")
+        self.lang = cfg.get("artifact", {}).get("lang", "html")
         self.usage = Usage()
         self._sem = asyncio.Semaphore(self.cfg.get("concurrency", 8))
         if not mock:
@@ -51,7 +53,7 @@ class LLM:
     # -------------------------------------------------------------- mock
     def _mock_reply(self, model: str, messages: list[dict[str, str]]) -> str:
         if model == self.cfg["builder"]:
-            return "```html\n" + (ROOT / "tasks/cat_bounce/reference/index.html").read_text() + "\n```"
+            return f"```{self.lang}\n" + (ROOT / self.mock_reply_path).read_text() + "\n```"
         # mutator mock: echo the last markdown-looking chunk with a marker so lineage is visible
         import re
 

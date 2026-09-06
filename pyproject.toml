@@ -4,16 +4,25 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "llm-memory-evolution"
-version = "0.1.0"
-description = "Evolve CLAUDE.md-style instruction files against a coding fitness function"
+version = "0.2.0"
+description = "Evolve CLAUDE.md-style instruction files against a backtested MLB betting-model fitness function"
 requires-python = ">=3.11"
 dependencies = [
     "openai>=1.40",
-    "playwright>=1.45",
     "pyyaml>=6",
     "rich>=13",
     "python-dotenv>=1",
+    "numpy>=2",
+    "pandas>=2.2",
+    "pyarrow>=17",
+    "scikit-learn>=1.6",
+    "scipy>=1.14",
+    "requests>=2.32",
+    "openpyxl>=3.1",
 ]
 
+[project.optional-dependencies]
+browser = ["playwright>=1.45"]
+
 [tool.setuptools]
-packages = ["evolve"]
+packages = ["evolve", "tasks", "tasks.mlb_kalshi", "tasks.mlb_kalshi.sources"]

@@ -1,0 +1,4 @@
+artifact: {filename: index.html, lang: html}
+mock_reply: tasks/cat_bounce/reference/index.html
+domain_hint: "asked to build a small browser app"
+practice_hint: "planning, output discipline, defensive coding, verifying requirements, DOM/event/animation habits"

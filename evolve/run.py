@@ -42,19 +42,20 @@ def load_seeds(cfg: dict[str, Any], n: int) -> list[Individual]:
     return pop
 
 
-async def evaluate_population(pop: list[Individual], gen_dir: Path, llm: LLM, cfg: dict[str, Any]) -> None:
+async def evaluate_population(pop: list[Individual], gen_dir: Path, llm: LLM, cfg: dict[str, Any], gen: int = 0) -> None:
     spec = load_spec(cfg)
     n_samples = cfg["evolution"]["samples_per_eval"]
+    ext = Path(cfg["artifact"]["filename"]).suffix
 
     async def build_one(ind: Individual, s: int) -> Path:
         d = gen_dir / ind.id
         d.mkdir(parents=True, exist_ok=True)
-        out = d / f"sample_{s}.html"
+        out = d / f"sample_{s}{ext}"
         meta = d / f"sample_{s}.meta.json"
         if out.exists() and meta.exists():
             return out
-        html, raw, ct = await build(llm, cfg, ind.md, spec)
-        out.write_text(html)
+        code, raw, ct = await build(llm, cfg, ind.md, spec)
+        out.write_text(code)
         (d / f"sample_{s}.reply.txt").write_text(raw)
         meta.write_text(json.dumps({"completion_tokens": ct}))
         return out
@@ -64,12 +65,13 @@ async def evaluate_population(pop: list[Individual], gen_dir: Path, llm: LLM, cf
         (gen_dir / ind.id / "agent.md").write_text(ind.md)
 
     jobs = [(ind, s) for ind in pop for s in range(n_samples)]
-    console.print(f"  building {len(jobs)} pages with {cfg['models']['builder']} ...")
+    console.print(f"  building {len(jobs)} artifacts with {cfg['models']['builder']} ...")
     t0 = time.time()
     paths = await asyncio.gather(*(build_one(ind, s) for ind, s in jobs))
-    console.print(f"  built in {time.time() - t0:.0f}s; evaluating with Playwright ...")
+    console.print(f"  built in {time.time() - t0:.0f}s; evaluating ...")
     t0 = time.time()
-    results = await asyncio.to_thread(evaluate_many, list(paths), cfg)
+    ecfg = {**cfg, "fitness": {**cfg.get("fitness", {}), "generation": gen}}
+    results = await asyncio.to_thread(evaluate_many, list(paths), ecfg)
     console.print(f"  evaluated in {time.time() - t0:.0f}s")
 
     by_ind: dict[str, list] = {ind.id: [] for ind in pop}
@@ -151,7 +153,7 @@ async def main_async(args: argparse.Namespace) -> None:
         if gen > 0:  # pop holds the evaluated previous generation (fresh or loaded on resume)
             pop = await next_generation(pop, gen, llm, cfg, rng)
         gen_dir = run_dir / f"gen_{gen:02d}"
-        await evaluate_population(pop, gen_dir, llm, cfg)
+        await evaluate_population(pop, gen_dir, llm, cfg, gen)
         save_generation(gen_dir, pop)
         print_generation(gen, pop)
         (run_dir / "usage.json").write_text(json.dumps(llm.usage.to_dict(), indent=1))

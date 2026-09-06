@@ -5,12 +5,12 @@ models:
   mutator: Qwen/Qwen3-235B-A22B-Instruct-2507  # rewrites MD files; deliberately a different model
   base_url: https://api.deepinfra.com/v1/openai
   builder_temperature: null   # null = provider default
-  builder_max_tokens: 12000
+  builder_max_tokens: 16000
   mutator_temperature_blind: 1.0
   mutator_temperature_informed: 0.7
   concurrency: 8              # parallel builder calls
 
-task: tasks/cat_bounce
+task: tasks/mlb_kalshi        # task folder: spec.md, task.yaml, tests/checks.py, reference/
 seeds_dir: seeds
 
 evolution:
@@ -30,12 +30,37 @@ lint:
   max_code_block_lines: 8
   long_code_block_penalty: 0.15
   long_code_block_cap: 0.45
-  forbidden_keywords: [cat, cats, kitten, kitty, bounce, bouncing, rain]
+  # whole-word matches; also injected into every mutator prompt as "never mention"
+  forbidden_keywords: [baseball, mlb, pitcher, pitchers, bet, bets, betting, bettor, wager, odds, moneyline,
+                       kelly, bankroll, stake, staking, roi, sportsbook, bookmaker, kalshi, elo, backtest]
   keyword_penalty: 0.2
   max_words: 1500
   length_penalty: 0.1
 
-fitness:
-  headless: true
-  workers: 2                 # parallel browsers; interaction checks are timing-sensitive
-  viewport: {width: 1000, height: 700}
+fitness:                      # passed verbatim to tasks/<task>/tests/checks.py
+  workers: 4                  # parallel sandboxes (each capped at 2 BLAS threads)
+  timeout_s: 240              # wall clock for one sandbox run (folds_per_eval + 1 predict calls)
+  memory_mb: 4096             # RLIMIT_AS, Linux only
+  data_dir: tasks/mlb_kalshi/data
+  eval_start: "2025-04-16"    # first day with Kalshi single-game markets
+  holdout_start: "2026-08-01" # never used during evolution; score the winner on it by hand
+  folds_per_eval: 2           # folds rotated per generation (seeded by fold_seed + generation)
+  fold_seed: 0
+  staking:                    # fixed flat-bankroll rule applied to every candidate
+    min_edge: 0.02
+    kelly_fraction: 0.25
+    max_stake: 0.05
+    fee_rate: 0.035           # Kalshi taker fee 0.07 x KXMLBGAME multiplier 0.5, times p(1-p)
+    min_price: 0.03
+    max_price: 0.97
+  thresholds:
+    logloss_vs_naive: 0.01
+    brier_vs_naive: 0.003
+    logloss_near_market: 0.005
+    logloss_beats_market: 0.001
+    ece_max: 0.05
+    min_pred_std: 0.03
+    min_bet_frac: 0.10
+    roi_stretch: 0.03
+    max_drawdown: 0.10       # worst peak-to-trough loss as a fraction of total turnover
+    fold_disaster: -0.10     # worst single-fold ROI

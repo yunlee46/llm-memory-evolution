@@ -8,6 +8,8 @@ Every check is isolated with try/except so one failure cannot mask the others.
 """
 from __future__ import annotations
 
+from pathlib import Path
+
 import re
 import time
 from dataclasses import dataclass
@@ -180,7 +182,7 @@ def _guard(results, name, weight, fn):
 
 # ------------------------------------------------------------------ main
 
-def run(browser, url, cfg) -> list[CheckResult]:
+def run_browser(browser, url, cfg) -> list[CheckResult]:
     results: list[CheckResult] = []
     errors: list[str] = []
     external: list[str] = []
@@ -451,3 +453,25 @@ def run(browser, url, cfg) -> list[CheckResult]:
         ctx.close()
 
     return results
+
+
+# ---------------------------------------------------------------- harness contract (evolve.fitness)
+
+def setup_worker(cfg):
+    from playwright.sync_api import sync_playwright
+
+    p = sync_playwright().start()
+    browser = p.chromium.launch(headless=cfg.get("headless", True))
+    return (p, browser)
+
+
+def teardown_worker(ctx):
+    p, browser = ctx
+    try:
+        browser.close()
+    finally:
+        p.stop()
+
+
+def run(ctx, artifact_path, cfg):
+    return run_browser(ctx[1], Path(artifact_path).resolve().as_uri(), cfg)

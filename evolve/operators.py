@@ -136,6 +136,9 @@ async def mutate_informed(llm: LLM, cfg: dict[str, Any], md: str, check_rates: d
                           rng: random.Random) -> tuple[str, str]:
     """Rewrite the whole file, shown a random subset of per-check pass rates (partial context)."""
     mc = cfg["models"]
+    tm = cfg.get("task_meta", {})
+    domain = tm.get("domain_hint", "asked to complete a programming task")
+    practices = tm.get("practice_hint", "planning, output discipline, defensive coding, verifying requirements")
     frac = cfg["evolution"].get("informed_context_fraction", 0.5)
     names = sorted(check_rates)
     k = max(1, round(len(names) * frac))
@@ -143,12 +146,11 @@ async def mutate_informed(llm: LLM, cfg: dict[str, Any], md: str, check_rates: d
     lines = "\n".join(f"- {n}: passed {check_rates[n]:.0%} of attempts" for n in shown) or "- (no results available)"
     prompt = (
         f"{_preamble(cfg)}\n\nA coding model was given the instruction file below as its system prompt and "
-        f"then asked to build a small browser app. Each build was scored by automated behavioural checks. "
+        f"then {domain}. Each attempt was scored by automated checks. "
         f"A partial view of the results (check name and pass rate) is:\n\n{lines}\n\n"
         f"Current file:\n\n---BEGIN---\n{md}\n---END---\n\n"
         "Rewrite the whole file so that a model following it is more likely to pass checks like these, "
-        "using only general engineering practices (planning, output discipline, defensive coding, "
-        "verifying requirements, DOM/event/animation habits). Do not name the checks or describe the app. "
+        f"using only general engineering practices ({practices}). Do not name the checks or describe the task. "
         "Return the full file between ---BEGIN--- and ---END---."
     )
     reply = await llm.chat(mc["mutator"], [{"role": "user", "content": prompt}],
