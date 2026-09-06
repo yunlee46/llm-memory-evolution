@@ -1,0 +1,41 @@
+# Model ids as listed by https://api.deepinfra.com/v1/openai/models
+# Verify with: python -m evolve.llm --list | grep -i deepseek
+models:
+  builder: deepseek-ai/DeepSeek-V4-Flash      # the model under study
+  mutator: Qwen/Qwen3-235B-A22B-Instruct-2507  # rewrites MD files; deliberately a different model
+  base_url: https://api.deepinfra.com/v1/openai
+  builder_temperature: null   # null = provider default
+  builder_max_tokens: 12000
+  mutator_temperature_blind: 1.0
+  mutator_temperature_informed: 0.7
+  concurrency: 8              # parallel builder calls
+
+task: tasks/cat_bounce
+seeds_dir: seeds
+
+evolution:
+  population: 10
+  generations: 6
+  samples_per_eval: 3         # builds per MD per generation; fitness = mean test score
+  elites: 2
+  tournament_k: 3
+  section_mutation_rate: 0.1  # per-section chance of a blind rewrite after crossover
+  informed_context_fraction: 0.5  # share of per-check results shown to the informed mutator
+  offspring_mix:              # must sum to population - elites
+    crossover: 4
+    informed: 2
+    blind: 2
+
+lint:
+  max_code_block_lines: 8
+  long_code_block_penalty: 0.15
+  long_code_block_cap: 0.45
+  forbidden_keywords: [cat, cats, kitten, kitty, bounce, bouncing, rain]
+  keyword_penalty: 0.2
+  max_words: 1500
+  length_penalty: 0.1
+
+fitness:
+  headless: true
+  workers: 2                 # parallel browsers; interaction checks are timing-sensitive
+  viewport: {width: 1000, height: 700}

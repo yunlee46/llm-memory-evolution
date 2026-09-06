@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cat Bounce (reference)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: sans-serif; }
+  #stage { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+  .cat { position: absolute; width: 60px; height: 60px; font-size: 48px; line-height: 60px;
+         text-align: center; cursor: grab; user-select: none; will-change: transform; }
+  .cat.held { cursor: grabbing; }
+  #make-it-rain { position: absolute; top: 12px; left: 12px; z-index: 10; padding: 8px 14px;
+                  font-size: 16px; cursor: pointer; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <button id="make-it-rain">Make It Rain</button>
+</div>
+<script>
+(function () {
+  const stage = document.getElementById('stage');
+  const btn = document.getElementById('make-it-rain');
+  const SIZE = 60, GRAVITY = 2000, RESTITUTION = 0.7, FRICTION = 0.995;
+  const cats = [];
+  let held = null;
+
+  function randomColor() {
+    return 'hsl(' + Math.floor(Math.random() * 360) + ', 60%, 80%)';
+  }
+  function recolor() { document.body.style.background = randomColor(); }
+  recolor();
+  window.addEventListener('resize', recolor);
+
+  function makeCat(x, y) {
+    const el = document.createElement('div');
+    el.className = 'cat';
+    el.textContent = '🐱';
+    el.setAttribute('role', 'img');
+    el.setAttribute('aria-label', 'cat');
+    stage.appendChild(el);
+    const c = { el, x, y, vx: (Math.random() - 0.5) * 200, vy: 0 };
+    cats.push(c);
+    return c;
+  }
+
+  function place(c) { c.el.style.transform = 'translate(' + c.x + 'px,' + c.y + 'px)'; }
+
+  for (let i = 0; i < 5; i++) {
+    makeCat(60 + Math.random() * (stage.clientWidth - SIZE - 120), Math.random() * 100);
+  }
+  btn.addEventListener('click', function () {
+    for (let i = 0; i < 6; i++) makeCat(Math.random() * (stage.clientWidth - SIZE), -SIZE - Math.random() * 100);
+  });
+
+  // drag and throw
+  let lastPointer = null;
+  stage.addEventListener('mousedown', function (e) {
+    const el = e.target.closest('.cat');
+    if (!el) return;
+    held = cats.find(c => c.el === el);
+    held.el.classList.add('held');
+    held.vx = held.vy = 0;
+    lastPointer = { x: e.clientX, y: e.clientY, t: performance.now() };
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', function (e) {
+    if (!held) return;
+    const now = performance.now();
+    const dt = Math.max((now - lastPointer.t) / 1000, 0.001);
+    const nx = e.clientX - SIZE / 2, ny = e.clientY - SIZE / 2;
+    held.vx = (nx - held.x) / dt;
+    held.vy = (ny - held.y) / dt;
+    held.x = nx; held.y = ny;
+    lastPointer = { x: e.clientX, y: e.clientY, t: now };
+    place(held);
+  });
+  window.addEventListener('mouseup', function () {
+    if (!held) return;
+    // If pointer sat still before release, kill the stale velocity.
+    if (performance.now() - lastPointer.t > 100) held.vx = held.vy = 0;
+    held.el.classList.remove('held');
+    held = null;
+  });
+
+  let last = performance.now();
+  function tick(now) {
+    let dt = (now - last) / 1000; last = now;
+    if (dt > 0.05) dt = 0.05;
+    const W = stage.clientWidth, H = stage.clientHeight;
+    for (const c of cats) {
+      if (c === held) continue;
+      c.vy += GRAVITY * dt;
+      c.vx *= FRICTION;
+      c.x += c.vx * dt; c.y += c.vy * dt;
+      if (c.y + SIZE > H) { c.y = H - SIZE; c.vy = -Math.abs(c.vy) * RESTITUTION; if (Math.abs(c.vy) < 40) c.vy = 0; }
+      if (c.y < -H) { c.y = -H; c.vy = 0; }
+      if (c.x < 0) { c.x = 0; c.vx = Math.abs(c.vx) * RESTITUTION; }
+      if (c.x + SIZE > W) { c.x = W - SIZE; c.vx = -Math.abs(c.vx) * RESTITUTION; }
+      place(c);
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

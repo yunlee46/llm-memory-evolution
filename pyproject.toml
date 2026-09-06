@@ -1,0 +1,19 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "llm-memory-evolution"
+version = "0.1.0"
+description = "Evolve CLAUDE.md-style instruction files against a coding fitness function"
+requires-python = ">=3.11"
+dependencies = [
+    "openai>=1.40",
+    "playwright>=1.45",
+    "pyyaml>=6",
+    "rich>=13",
+    "python-dotenv>=1",
+]
+
+[tool.setuptools]
+packages = ["evolve"]
