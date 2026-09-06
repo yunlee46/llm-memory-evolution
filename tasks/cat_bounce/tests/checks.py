@@ -241,16 +241,18 @@ def run(browser, url, cfg) -> list[CheckResult]:
             if not b:
                 return False, "no cats"
             cx, cy = b["x"] + b["w"] / 2, b["y"] + b["h"] / 2
+            sb = _stage_box(page) or {"x": 0, "w": 1000}
+            sign = 1 if cx < sb["x"] + sb["w"] / 2 else -1  # drag toward the side with more room
             page.mouse.move(cx, cy)
             page.mouse.down()
             for i in range(1, 11):
-                page.mouse.move(cx + 20 * i, cy - 10 * i)
+                page.mouse.move(cx + sign * 20 * i, cy - 10 * i)
                 page.wait_for_timeout(30)
             nb = picked_box() or b
             ncx, ncy = nb["x"] + nb["w"] / 2, nb["y"] + nb["h"] / 2
             page.mouse.up()
-            ok = abs(ncx - (cx + 200)) < 30 and abs(ncy - (cy - 100)) < 30
-            return ok, f"pointer moved (+200,-100); cat moved ({ncx - cx:+.0f},{ncy - cy:+.0f})"
+            ok = abs(ncx - (cx + sign * 200)) < 30 and abs(ncy - (cy - 100)) < 30
+            return ok, f"pointer moved ({sign * 200:+d},-100); cat moved ({ncx - cx:+.0f},{ncy - cy:+.0f})"
         _guard(results, "drag_moves_cat", 2, drag)
 
         page.wait_for_timeout(2500)
