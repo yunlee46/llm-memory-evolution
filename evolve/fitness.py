@@ -1,4 +1,6 @@
-"""Fitness = weighted check pass rate on a built artifact, minus MD lint penalties.
+"""Fitness = weighted mean check score on a built artifact, minus MD lint penalties.
+
+Checks are either gates (pass/fail) or graded (a score in [0, 1]); `CheckResult.value` unifies them.
 
 Task folders are pluggable: tasks/<name>/tests/checks.py must expose
     run(ctx, artifact_path: Path, fitness_cfg) -> list[CheckResult]
@@ -25,6 +27,14 @@ class CheckResult:
     weight: float
     passed: bool
     detail: str = ""
+    score: float | None = None   # graded checks: partial credit in [0, 1]; None = binary (use `passed`)
+
+    @property
+    def value(self) -> float:
+        """Credit earned, in [0, 1]."""
+        if self.score is None:
+            return 1.0 if self.passed else 0.0
+        return float(min(1.0, max(0.0, self.score)))
 
 
 @dataclass
@@ -50,7 +60,7 @@ def score_checks(checks: list[CheckResult]) -> float:
     total = sum(c.weight for c in checks)
     if total == 0:
         return 0.0
-    return round(sum(c.weight for c in checks if c.passed) / total, 4)
+    return round(sum(c.weight * c.value for c in checks) / total, 4)
 
 
 def _worker_ctx(mod, fcfg):
@@ -166,7 +176,8 @@ def main(argv: list[str]) -> None:
         r = evaluate_artifact(Path(h), cfg)
         print(f"\n{h}: score={r.score}" + (f"  ERROR {r.error}" if r.error else ""))
         for c in r.checks:
-            print(f"  {'PASS' if c.passed else 'FAIL'} {c.name:<24} w={c.weight:<3} {c.detail}")
+            tag = f"{c.value:.2f}" if c.score is not None else ("PASS" if c.passed else "FAIL")
+            print(f"  {tag:>4} {c.name:<24} w={c.weight:<3} {c.detail}")
 
 
 if __name__ == "__main__":

@@ -21,6 +21,9 @@ COLS = {
     "date": 0, "game_num": 1, "away_rs": 3, "home_rs": 6, "away_score": 9, "home_score": 10,
     "day_night": 12, "park": 16, "away_sp_id": 101, "away_sp": 102, "home_sp_id": 103, "home_sp": 104,
 }
+# per-team box-score totals (glfields 22-49 visiting, 50-77 home); train-only "outcome" columns
+BOX = {"hits": 1, "hr": 4, "bb": 9, "so": 11, "lob": 16, "pitchers": 17, "er": 19, "err": 24}
+BOX_COLS = {f"away_{k}": 21 + off for k, off in BOX.items()} | {f"home_{k}": 49 + off for k, off in BOX.items()}
 
 
 def download(year: int, raw_dir: Path) -> Path:
@@ -38,6 +41,8 @@ def parse(zip_path: Path) -> pd.DataFrame:
         name = next(n for n in z.namelist() if n.lower().endswith(".txt"))
         raw = pd.read_csv(io.BytesIO(z.read(name)), header=None, dtype=str, keep_default_na=False)
     df = pd.DataFrame({k: raw.iloc[:, i] for k, i in COLS.items()})
+    for k, i in BOX_COLS.items():
+        df[k] = pd.to_numeric(raw.iloc[:, i], errors="coerce").astype("float32")
     df["date"] = pd.to_datetime(df["date"], format="%Y%m%d")
     df["game_num"] = df["game_num"].astype(int)
     df["home_score"] = df["home_score"].astype(int)
@@ -48,7 +53,7 @@ def parse(zip_path: Path) -> pd.DataFrame:
     df["home_sp"] = df["home_sp"].str.strip()
     df["away_sp"] = df["away_sp"].str.strip()
     return df[["date", "game_num", "home", "away", "home_score", "away_score", "day_night", "park",
-               "home_sp", "away_sp", "home_sp_id", "away_sp_id"]]
+               "home_sp", "away_sp", "home_sp_id", "away_sp_id", *BOX_COLS]]
 
 
 def load_games(seasons: list[int], raw_dir: Path) -> pd.DataFrame:

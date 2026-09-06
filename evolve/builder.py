@@ -82,7 +82,7 @@ def main(argv: list[str]) -> None:
         r = evaluate_artifact(out, cfg)
         print(f"score={r.score} {r.error}")
         for c in r.checks:
-            print(f"  {'PASS' if c.passed else 'FAIL'} {c.name:<24} {c.detail}")
+            print(f"  {(f'{c.value:.2f}' if c.score is not None else ('PASS' if c.passed else 'FAIL')):>4} {c.name:<24} {c.detail}")
 
 
 if __name__ == "__main__":

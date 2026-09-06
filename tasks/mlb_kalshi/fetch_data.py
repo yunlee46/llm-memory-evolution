@@ -22,7 +22,10 @@ from evolve.config import ROOT, load_config
 
 from .sources import kalshi, retrosheet, sbro, statsapi
 
-LABELS = ["home_score", "away_score", "home_win"]
+from .sources.retrosheet import BOX_COLS
+
+# outcome columns: present in train frames only (test frames have them physically removed)
+LABELS = ["home_score", "away_score", "home_win", *BOX_COLS]
 META = ["kalshi_ticker_home", "kalshi_ticker_away", "kalshi_snapshot_ts", "first_pitch_ts", "split", "fold",
         "source", "game_pk", "home_sp_id", "away_sp_id"]
 FEATURES = ["game_id", "date", "season", "game_num", "day_night", "home", "away", "park", "home_sp", "away_sp",
@@ -197,8 +200,9 @@ def write_folds(g: pd.DataFrame, folds: list[dict], out: Path) -> None:
 def main(argv=None) -> None:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--config", default="config.yaml")
-    ap.add_argument("--stage", choices=["all", "build"], default="all",
-                    help="'build' rebuilds parquet + folds from the cached intermediate frames")
+    ap.add_argument("--stage", choices=["all", "outcomes", "build"], default="all",
+                    help="'outcomes' re-parses retrosheet/statsapi (cached downloads) but reuses sbro + kalshi frames; "
+                         "'build' rebuilds parquet + folds from all cached intermediate frames")
     ap.add_argument("--no-sbro", action="store_true")
     ap.add_argument("--first-season", type=int, default=2005)
     ap.add_argument("--last-retro", type=int, default=2025, help="last season with Retrosheet game logs")
@@ -209,16 +213,18 @@ def main(argv=None) -> None:
     raw = data / "raw"
     raw.mkdir(parents=True, exist_ok=True)
 
-    if args.stage == "all":
+    if args.stage in ("all", "outcomes"):
         g = stage_outcomes(raw, args.first_season, args.last_retro)
         g.to_parquet(raw / "outcomes.parquet", index=False)
+    else:
+        g = pd.read_parquet(raw / "outcomes.parquet")
+    if args.stage == "all":
         odds = pd.DataFrame() if args.no_sbro else sbro.load_odds(list(range(max(2010, args.first_season), 2022)), raw / "sbro")
         odds.to_parquet(raw / "sbro.parquet", index=False)
         mk = kalshi.load_markets(raw / "kalshi")
         mk = kalshi.add_snapshots(mk, raw / "kalshi")
         mk.to_parquet(raw / "kalshi_markets.parquet", index=False)
     else:
-        g = pd.read_parquet(raw / "outcomes.parquet")
         odds = pd.read_parquet(raw / "sbro.parquet") if (raw / "sbro.parquet").exists() else pd.DataFrame()
         mk = pd.read_parquet(raw / "kalshi_markets.parquet")
 

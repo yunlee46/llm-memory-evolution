@@ -143,11 +143,11 @@ async def mutate_informed(llm: LLM, cfg: dict[str, Any], md: str, check_rates: d
     names = sorted(check_rates)
     k = max(1, round(len(names) * frac))
     shown = sorted(rng.sample(names, k)) if names else []
-    lines = "\n".join(f"- {n}: passed {check_rates[n]:.0%} of attempts" for n in shown) or "- (no results available)"
+    lines = "\n".join(f"- {n}: mean score {check_rates[n]:.0%}" for n in shown) or "- (no results available)"
     prompt = (
         f"{_preamble(cfg)}\n\nA coding model was given the instruction file below as its system prompt and "
         f"then {domain}. Each attempt was scored by automated checks. "
-        f"A partial view of the results (check name and pass rate) is:\n\n{lines}\n\n"
+        f"A partial view of the results (check name and mean score, 100% = full credit) is:\n\n{lines}\n\n"
         f"Current file:\n\n---BEGIN---\n{md}\n---END---\n\n"
         "Rewrite the whole file so that a model following it is more likely to pass checks like these, "
         f"using only general engineering practices ({practices}). Do not name the checks or describe the task. "

@@ -88,7 +88,8 @@ async def evaluate_population(pop: list[Individual], gen_dir: Path, llm: LLM, cf
         ind.samples = [dict(r.to_dict(), completion_tokens=(toks[i] if i < len(toks) else None)) for i, r in enumerate(rs)]
         ind.test_score = round(sum(r.score for r in rs) / len(rs), 4)
         names = {c.name for r in rs for c in r.checks}
-        ind.check_rates = {n: round(sum(1 for r in rs for c in r.checks if c.name == n and c.passed) / len(rs), 3)
+        # mean credit per check across samples (graded checks contribute partial credit)
+        ind.check_rates = {n: round(sum(c.value for r in rs for c in r.checks if c.name == n) / len(rs), 3)
                            for n in sorted(names)}
         ind.lint_penalty, ind.lint_reasons = md_lint(ind.md, cfg)
         ind.fitness = round(max(0.0, ind.test_score - ind.lint_penalty), 4)

@@ -44,7 +44,7 @@ fitness:                      # passed verbatim to tasks/<task>/tests/checks.py
   data_dir: tasks/mlb_kalshi/data
   eval_start: "2025-04-16"    # first day with Kalshi single-game markets
   holdout_start: "2026-08-01" # never used during evolution; score the winner on it by hand
-  folds_per_eval: 2           # folds rotated per generation (seeded by fold_seed + generation)
+  folds_per_eval: 4           # folds rotated per generation (seeded by fold_seed + generation); metrics are pooled
   fold_seed: 0
   staking:                    # fixed flat-bankroll rule applied to every candidate
     min_edge: 0.02
@@ -53,14 +53,12 @@ fitness:                      # passed verbatim to tasks/<task>/tests/checks.py
     fee_rate: 0.035           # Kalshi taker fee 0.07 x KXMLBGAME multiplier 0.5, times p(1-p)
     min_price: 0.03
     max_price: 0.97
-  thresholds:
-    logloss_vs_naive: 0.01
-    brier_vs_naive: 0.003
-    logloss_near_market: 0.005
-    logloss_beats_market: 0.001
-    ece_max: 0.05
-    min_pred_std: 0.03
-    min_bet_frac: 0.10
-    roi_stretch: 0.03
-    max_drawdown: 0.10       # worst peak-to-trough loss as a fraction of total turnover
-    fold_disaster: -0.10     # worst single-fold ROI
+  thresholds:                 # graded checks: see tasks/mlb_kalshi/tests/checks.py and README "Fitness details"
+    min_pred_std: 0.03        # not_degenerate gate
+    skill_floor: 0.005        # smallest market-over-naive edge (nats) used as the skill_vs_naive denominator
+    ece_max: 0.05             # calibration: half credit at this ECE, none at twice it
+    min_bet_frac: 0.10        # bet_coverage: full credit when betting >= this share of priced games
+    min_bets_abs: 20          # roi_tstat / drawdown / fold_consistency earn nothing below this many bets
+    roi_t_half: 1.0           # roi_tstat: half credit when the profit t-statistic equals this
+    max_drawdown: 0.10        # drawdown: half credit at this fraction of turnover, none at twice it
+    fold_disaster: -0.10      # fold_consistency: a fold at this ROI earns nothing, >= 0 earns full credit

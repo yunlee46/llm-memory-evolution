@@ -203,15 +203,44 @@ def _ece(p: np.ndarray, y: np.ndarray, bins: int = 10) -> float:
     return float(e)
 
 
-def metrics(p: np.ndarray, y: np.ndarray, p_market: np.ndarray, p_naive: float) -> dict[str, float]:
+def _pointwise_logloss(p: np.ndarray, y: np.ndarray) -> np.ndarray:
+    p = np.clip(p, 1e-6, 1 - 1e-6)
+    return -(y * np.log(p) + (1 - y) * np.log(1 - p))
+
+
+def _tstat(x: np.ndarray) -> float:
+    """mean / standard error; 0 when there is nothing to measure."""
+    x = np.asarray(x, dtype=float)
+    if len(x) < 2:
+        return 0.0
+    sd = float(np.std(x, ddof=1))
+    return float(np.mean(x) / (sd / np.sqrt(len(x)))) if sd > 0 else 0.0
+
+
+def _sigmoid(t: float) -> float:
+    return float(1.0 / (1.0 + np.exp(-t)))
+
+
+def metrics(p: np.ndarray, y: np.ndarray, p_market: np.ndarray, p_naive: float, skill_floor: float = 0.005) -> dict[str, float]:
+    """Pooled accuracy metrics. Skill measures are computed on the rows that have a market price so
+    the model, the naive rate and the market are compared on identical games."""
     ok = ~np.isnan(p_market)
-    return {
+    out = {
         "logloss": _logloss(p, y), "brier": _brier(p, y), "ece": _ece(p, y), "pred_std": float(np.std(p)),
         "logloss_naive": _logloss(np.full_like(p, p_naive), y), "brier_naive": _brier(np.full_like(p, p_naive), y),
-        "logloss_market": _logloss(p_market[ok], y[ok]) if ok.any() else float("nan"),
-        "logloss_on_market_rows": _logloss(p[ok], y[ok]) if ok.any() else float("nan"),
         "n": int(len(p)), "n_market": int(ok.sum()),
+        "logloss_market": float("nan"), "logloss_on_market_rows": float("nan"), "logloss_naive_market_rows": float("nan"),
+        "skill_frac": 0.0, "market_t": 0.0,
     }
+    if ok.any():
+        lm, lp = _pointwise_logloss(p_market[ok], y[ok]), _pointwise_logloss(p[ok], y[ok])
+        ln = _pointwise_logloss(np.full(int(ok.sum()), p_naive), y[ok])
+        out["logloss_market"], out["logloss_on_market_rows"], out["logloss_naive_market_rows"] = float(lm.mean()), float(lp.mean()), float(ln.mean())
+        # share of the market's edge over the naive rate that the model captures (0 = naive, 1 = market)
+        out["skill_frac"] = float((ln.mean() - lp.mean()) / max(ln.mean() - lm.mean(), skill_floor))
+        # paired per-game comparison with the market: positive = model better
+        out["market_t"] = _tstat(lm - lp)
+    return out
 
 
 def backtest(p: np.ndarray, ask_h: np.ndarray, ask_a: np.ndarray, y: np.ndarray, dates: np.ndarray,
@@ -240,9 +269,12 @@ def backtest(p: np.ndarray, ask_h: np.ndarray, ask_a: np.ndarray, y: np.ndarray,
     # comparable between a model that bets 50 games and one that bets 700
     by_fold = {str(k): (float(pnl[fold_ids == k].sum() / staked[fold_ids == k].sum()) if staked[fold_ids == k].sum() > 0 else 0.0)
                for k in np.unique(fold_ids)}
+    # only folds where the rule actually bet carry a per-fold ROI
+    by_fold = {k: v for k, v in by_fold.items() if staked[fold_ids == k].sum() > 0}
     return {"n_bets": int(bet.sum()), "n_priced": int(priced.sum()), "total_stake": total_stake,
             "total_pnl": float(pnl.sum()), "roi": float(pnl.sum() / total_stake) if total_stake > 0 else 0.0,
-            "max_drawdown": float(dd / total_stake) if total_stake > 0 else 0.0, "roi_by_fold": by_fold}
+            "max_drawdown": float(dd / total_stake) if total_stake > 0 else 0.0, "roi_by_fold": by_fold,
+            "pnl_t": _tstat(pnl[bet])}
 
 
 # ---------------------------------------------------------------- run
@@ -256,14 +288,24 @@ def _guard(results: list[CheckResult], name: str, weight: float, fn: Callable[[]
     return bool(ok)
 
 
+def _graded(results: list[CheckResult], name: str, weight: float, fn: Callable[[], tuple[float, str]]) -> float:
+    """A check with partial credit: fn returns (score in [0, 1], detail). `passed` means at least half credit."""
+    try:
+        score, detail = fn()
+        score = float(np.clip(score, 0.0, 1.0)) if np.isfinite(score) else 0.0
+    except Exception as e:  # noqa: BLE001
+        score, detail = 0.0, f"{type(e).__name__}: {e}"
+    results.append(CheckResult(name, weight, score >= 0.5, str(detail)[:300], score=score))
+    return score
+
+
 def _not_earned(results: list[CheckResult], names: list[tuple[str, float]]) -> None:
     for n, w in names:
         results.append(CheckResult(n, w, False, "not earned"))
 
 
-QUALITY = [("not_degenerate", 1), ("logloss_beats_naive", 2), ("brier_beats_naive", 1), ("logloss_near_market", 2),
-           ("logloss_beats_market", 1), ("calibration_ece", 2), ("min_bets", 1), ("roi_positive", 2), ("roi_stretch", 1),
-           ("max_drawdown", 1), ("no_fold_disaster", 1)]
+QUALITY = [("not_degenerate", 1), ("skill_vs_naive", 3), ("skill_vs_market", 3), ("calibration", 2),
+           ("bet_coverage", 1), ("roi_tstat", 3), ("drawdown", 1), ("fold_consistency", 1)]
 
 
 def run(ctx: Ctx, artifact_path: Path, fcfg: dict[str, Any]) -> list[CheckResult]:
@@ -317,28 +359,38 @@ def run(ctx: Ctx, artifact_path: Path, fcfg: dict[str, Any]) -> list[CheckResult
     det = sb.repeat is not None and len(sb.repeat) == len(first) and bool(np.max(np.abs(sb.repeat - first)) < 1e-9)
     results.append(CheckResult("deterministic", 1, det, "" if det else "repeat call differed"))
 
-    # ---- quality
+    # ---- quality (graded: partial credit in [0, 1], pooled over the selected folds)
     th = fcfg.get("thresholds", {})
     st = fcfg.get("staking", {})
     train_rate = float(ctx.games.loc[ctx.games["date"] < pd.Timestamp(folds[0]["start"]), "home_win"].mean())
-    m = metrics(p, df["y"].values, df["pm"].values, train_rate)
+    m = metrics(p, df["y"].values, df["pm"].values, train_rate, th.get("skill_floor", 0.005))
     bt = backtest(p, df["ask_h"].values, df["ask_a"].values, df["y"].values, df["date"].values, df["fold"].values, st)
+    ece_max, dd_max, disaster = th.get("ece_max", 0.05), th.get("max_drawdown", 0.10), th.get("fold_disaster", -0.10)
+    min_bets = int(th.get("min_bets_abs", 20))
+    enough = bt["n_bets"] >= min_bets
+    too_few = f"bets={bt['n_bets']} < {min_bets}: no evidence"
 
     _guard(results, "not_degenerate", 1, lambda: (m["pred_std"] > th.get("min_pred_std", 0.03), f"std={m['pred_std']:.3f}"))
-    _guard(results, "logloss_beats_naive", 2, lambda: (m["logloss"] < m["logloss_naive"] - th.get("logloss_vs_naive", 0.01),
-                                                       f"ll={m['logloss']:.4f} naive={m['logloss_naive']:.4f}"))
-    _guard(results, "brier_beats_naive", 1, lambda: (m["brier"] < m["brier_naive"] - th.get("brier_vs_naive", 0.003),
-                                                     f"brier={m['brier']:.4f} naive={m['brier_naive']:.4f}"))
-    _guard(results, "logloss_near_market", 2, lambda: (m["logloss_on_market_rows"] <= m["logloss_market"] + th.get("logloss_near_market", 0.005),
-                                                       f"ll={m['logloss_on_market_rows']:.4f} market={m['logloss_market']:.4f} n={m['n_market']}"))
-    _guard(results, "logloss_beats_market", 1, lambda: (m["logloss_on_market_rows"] < m["logloss_market"] - th.get("logloss_beats_market", 0.001),
-                                                        f"ll={m['logloss_on_market_rows']:.4f} market={m['logloss_market']:.4f}"))
-    _guard(results, "calibration_ece", 2, lambda: (m["ece"] < th.get("ece_max", 0.05), f"ece={m['ece']:.4f}"))
-    min_bets = _guard(results, "min_bets", 1, lambda: (bt["n_bets"] >= th.get("min_bet_frac", 0.10) * max(1, bt["n_priced"]),
-                                                       f"bets={bt['n_bets']} priced={bt['n_priced']}"))
-    _guard(results, "roi_positive", 2, lambda: (min_bets and bt["roi"] > 0, f"roi={bt['roi']:+.4f} pnl={bt['total_pnl']:+.4f} stake={bt['total_stake']:.3f}"))
-    _guard(results, "roi_stretch", 1, lambda: (min_bets and bt["roi"] > th.get("roi_stretch", 0.03), f"roi={bt['roi']:+.4f}"))
-    _guard(results, "max_drawdown", 1, lambda: (min_bets and bt["max_drawdown"] < th.get("max_drawdown", 0.10), f"dd/turnover={bt['max_drawdown']:.4f}"))
-    _guard(results, "no_fold_disaster", 1, lambda: (min_bets and min(bt["roi_by_fold"].values()) > th.get("fold_disaster", -0.10),
-                                                    " ".join(f"{k}:{v:+.3f}" for k, v in bt["roi_by_fold"].items())))
+    # share of the market's log-loss edge over the constant home-win rate that the model captures
+    _graded(results, "skill_vs_naive", 3, lambda: (m["skill_frac"],
+            f"ll={m['logloss_on_market_rows']:.4f} naive={m['logloss_naive_market_rows']:.4f} market={m['logloss_market']:.4f} "
+            f"captured={m['skill_frac']:+.2f} n={m['n_market']}"))
+    # paired t-test of per-game log-loss vs the market: 0.5 = indistinguishable, ~0.88 at t=+2, ~0.12 at t=-2
+    _graded(results, "skill_vs_market", 3, lambda: (_sigmoid(m["market_t"]),
+            f"ll={m['logloss_on_market_rows']:.4f} market={m['logloss_market']:.4f} t={m['market_t']:+.2f}"))
+    # full credit at ECE 0, half at ece_max, none at 2 x ece_max
+    _graded(results, "calibration", 2, lambda: (1.0 - m["ece"] / (2 * ece_max), f"ece={m['ece']:.4f}"))
+    # betting rule: linear credit up to min_bet_frac of priced games
+    _graded(results, "bet_coverage", 1, lambda: (bt["n_bets"] / max(1.0, th.get("min_bet_frac", 0.10) * bt["n_priced"]),
+            f"bets={bt['n_bets']} priced={bt['n_priced']}"))
+    # t-statistic of per-bet profit after fees, half credit at t = roi_t_half: luck on a few hundred bets
+    # (|t| < 1) earns less than half, a consistent edge (t > 2) earns most of it
+    _graded(results, "roi_tstat", 3, lambda: ((_sigmoid(bt["pnl_t"] - th.get("roi_t_half", 1.0)), f"roi={bt['roi']:+.4f} pnl={bt['total_pnl']:+.4f} "
+            f"stake={bt['total_stake']:.3f} t={bt['pnl_t']:+.2f} n={bt['n_bets']}") if enough else (0.0, too_few)))
+    # full credit at no drawdown, half at max_drawdown, none at 2 x max_drawdown (fractions of turnover)
+    _graded(results, "drawdown", 1, lambda: ((1.0 - bt["max_drawdown"] / (2 * dd_max), f"dd/turnover={bt['max_drawdown']:.4f}")
+            if enough else (0.0, too_few)))
+    # per-fold ROI: full credit at >= 0, none at fold_disaster, averaged over folds that were bet
+    _graded(results, "fold_consistency", 1, lambda: ((float(np.mean([np.clip((v - disaster) / -disaster, 0, 1) for v in bt["roi_by_fold"].values()]))
+            if bt["roi_by_fold"] else 0.0, " ".join(f"{k}:{v:+.3f}" for k, v in bt["roi_by_fold"].items())) if enough else (0.0, too_few)))
     return results
