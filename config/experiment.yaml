@@ -1,0 +1,116 @@
+# All experiment knobs live here. No magic numbers in code.
+# See AGENTS.md §9.
+
+run_id: null          # null => auto-generated from timestamp at launch
+
+models:
+  # Pinned to exact, stable IDs — verified reachable on 2026-09-06.
+  #
+  # Deliberately NOT using "-latest" aliases or "-preview" IDs: an alias moves
+  # under you and a preview can change or be withdrawn mid-experiment, either
+  # of which makes generation 1 and generation 15 incomparable. The whole
+  # result is indexed to one fixed model.
+  #
+  # worker is the model under study — the finding is "what memory helps THIS
+  # model". Swap it if you'd rather study a different one.
+  worker: "gemini-3.8-flash"
+  # Only stable (non-preview, non-alias) Pro available. For a stronger curator
+  # at the cost of preview instability: "gemini-3.1-pro-preview".
+  curator: "gemini-2.5-pro"
+  judge: "gemini-2.5-pro"
+
+  worker_temperature: 0.7     # >0 on purpose: workers need variance for diversity
+  curator_temperature: 0.2
+  judge_temperature: 0.0
+
+  # Set to null to leave the model's default alone. Pinned per run for reproducibility.
+  worker_thinking_budget: null
+  curator_thinking_budget: null
+
+# ---------------------------------------------------------------------------
+# FREE-TIER MODE. The binding constraint is 20 API requests/day for the worker
+# model, not tokens or dollars. Every number below is derived from that.
+#
+#   requests per agent run  ~= max_turns + 1     (one request per turn)
+#   requests per generation  = agents_per_generation * requests per run
+#
+#   max_turns=5  ->  ~5 requests/run  ->  50 requests/generation  ->  2.5 days
+#   6 generations                     -> 300 requests             -> ~15 days
+#
+# The turns-vs-throughput tradeoff is brutal and there is no way around it on
+# 20 req/day: fewer turns means agents cannot iterate, more turns means fewer
+# runs. 5 is the smallest budget that still permits one fix cycle.
+#
+# Read §13 of AGENTS.md for what this design can and cannot demonstrate.
+# ---------------------------------------------------------------------------
+evolution:
+  generations: 6                # was 15; ~2 days per generation on 20 req/day
+  agents_per_generation: 10     # kept: per-generation precision matters more
+                                # than generation count when lift is noisy
+  trials_per_confirmation: 2    # was 3; the minimum that still catches a fluke
+  compaction_interval: 3
+  memory_token_cap: 1500
+  # Free-tier mode runs ONE task per generation, rotating through
+  # tasks.selection, instead of averaging over all of them. Averaging over 5
+  # tasks would cost 5x the requests per generation.
+  task_rotation: true
+
+  # Fraction of agents in group A (memory). Remainder is group B (fresh).
+  # Memory is worthless early and valuable late, so the split is scheduled.
+  group_split_schedule:
+    - { until_generation: 3,   group_a: 3 }
+    - { until_generation: 8,   group_a: 6 }
+    - { until_generation: 999, group_a: 8 }
+  min_group_b: 2                # never lose the control
+
+scoring:
+  lambda_cost: 0.05             # penalty weight on normalized token cost
+  mu_length: 0.05               # penalty weight on normalized memory length
+  cost_normalizer_tokens: 200000
+  length_normalizer_tokens: 1500
+
+tasks:
+  selection: []                 # filled after calibration (AGENTS.md §10)
+  held_out: []                  # never used for selection
+  calibration:
+    trials: 3                   # was 5; 3 is the floor for a usable mean
+    min_pass_rate: 0.2
+    max_pass_rate: 0.8
+
+sandbox:
+  backend: "auto"               # auto | docker | local
+  # Built from docker/Dockerfile.runner — pytest is baked in because the
+  # scoring container runs with no network.
+  image: "llm-memory-evolution-runner:latest"
+  # max_turns is now a REQUEST budget lever, not just a runaway guard: one turn
+  # is one API call, so this directly sets requests-per-run.
+  #
+  # Evidence: the one real agent run we have (word_freq, the EASIEST task) took
+  # 7 turns and did not write a file until turn 3, wasting turns 1-2 on
+  # list_files and a premature run_tests. BASE_SYSTEM now tells the agent the
+  # directory is empty and to write the full solution first, which should
+  # recover those two turns.
+  #
+  # 5 leaves: write -> run_tests -> fix -> run_tests -> finish.
+  # An earlier value of 3 was set from request arithmetic alone and would have
+  # cut every run off before its first test result — making every task look
+  # TOO_HARD for reasons that have nothing to do with the task.
+  #
+  # This is still UNVALIDATED against a real run. Confirm with a single
+  # `scripts/run_agent.py --task expr_eval` before spending quota on
+  # calibration.
+  max_turns: 5
+  wall_clock_s: 600
+  max_tokens_per_run: 200000
+  network: "deny"               # docker backend only; 'local' cannot enforce this
+
+api:
+  concurrency: 2                # was 5; free tier has a low per-minute cap too
+  max_retries: 6
+  initial_backoff_s: 2.0
+  max_backoff_s: 60.0
+  # Hard stop before the daily quota turns into a wall of 429s mid-generation.
+  # Set to null on the paid tier.
+  daily_request_budget: 20
+
+seed: 20260906

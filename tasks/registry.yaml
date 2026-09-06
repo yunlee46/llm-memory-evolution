@@ -1,0 +1,67 @@
+tasks:
+  word_freq:
+    description: "Pure-Python word frequency module. Small, deterministic, no browser \u2014\
+      \ the harness's own proving task. Too easy for research use; expected to fail calibration."
+    entrypoint: word_freq.py
+    expected_tests: 8
+    expected_held_out_tests: 3
+    runner: pytest
+    timeout_s: 60
+    requires: []
+  expr_eval:
+    description: 'Recursive-descent integer expression evaluator. Traps: C-style truncating
+      division and sign-of-dividend modulo, right-associative power, unary minus binding looser
+      than power.'
+    entrypoint: expr_eval.py
+    expected_tests: 12
+    expected_held_out_tests: 12
+    runner: pytest
+    timeout_s: 60
+    requires: []
+  interval_ops:
+    description: 'Half-open interval set algebra: merge, intersect, subtract. Traps: touching
+      vs overlapping, empty intervals, argument mutation.'
+    entrypoint: interval_ops.py
+    expected_tests: 11
+    expected_held_out_tests: 5
+    runner: pytest
+    timeout_s: 60
+    requires: []
+  glob_match:
+    description: 'Glob matcher with character classes. Traps: ''*'' not crossing ''/'', ''**''
+      crossing it, literal '']'' and ''-'' inside classes, backtracking.'
+    entrypoint: glob_match.py
+    expected_tests: 11
+    expected_held_out_tests: 8
+    runner: pytest
+    timeout_s: 60
+    requires: []
+  semver:
+    description: 'Semantic version parsing and precedence. Traps: prerelease sorts before
+      release, numeric identifiers before alphanumeric, build metadata ignored for precedence,
+      leading-zero rules differing between prerelease and build.'
+    entrypoint: semver.py
+    expected_tests: 11
+    expected_held_out_tests: 7
+    runner: pytest
+    timeout_s: 60
+    requires: []
+  csv_parse:
+    description: 'RFC 4180 CSV parser. Traps: doubled quotes, newlines inside quoted fields,
+      a single trailing separator not creating a record, text after a closing quote.'
+    entrypoint: csv_parse.py
+    expected_tests: 11
+    expected_held_out_tests: 7
+    runner: pytest
+    timeout_s: 60
+    requires: []
+  lru_ttl:
+    description: 'LRU cache with TTL and an injected clock. Traps: get refreshes recency but
+      not TTL, len must not count as a use, expired entries dropped in preference to evicting
+      live ones, None as a storable value.'
+    entrypoint: lru_ttl.py
+    expected_tests: 11
+    expected_held_out_tests: 7
+    runner: pytest
+    timeout_s: 60
+    requires: []
