@@ -216,3 +216,10 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# project
+runs/
+
+# task data caches (Kalshi data terms forbid redistribution)
+tasks/*/data/*
+!tasks/*/data/README.md

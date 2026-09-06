@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Cat Bounce (reference)</title>
+<style>
+  html, body { margin: 0; height: 100%; overflow: hidden; font-family: sans-serif; }
+  #stage { position: relative; width: 100vw; height: 100vh; overflow: hidden; }
+  .cat { position: absolute; left: 0; top: 0; width: 60px; height: 60px; font-size: 48px; line-height: 60px;
+         text-align: center; cursor: grab; user-select: none; will-change: transform; }
+  .cat.held { cursor: grabbing; }
+  #hud { position: absolute; top: 12px; left: 12px; z-index: 10; display: flex; gap: 8px; align-items: center; }
+  #hud button { padding: 8px 14px; font-size: 16px; cursor: pointer; }
+  #counter { background: rgba(255,255,255,.7); padding: 6px 10px; border-radius: 6px; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <div id="hud">
+    <button id="make-it-rain">Make It Rain</button>
+    <button id="pause">Pause</button>
+    <button id="reset">Reset</button>
+    <span id="counter">Cats: 0</span>
+  </div>
+</div>
+<script>
+(function () {
+  const stage = document.getElementById('stage');
+  const rainBtn = document.getElementById('make-it-rain');
+  const pauseBtn = document.getElementById('pause');
+  const resetBtn = document.getElementById('reset');
+  const counter = document.getElementById('counter');
+  const SIZE = 60, GRAVITY = 2000, RESTITUTION = 0.6, FRICTION = 0.98, SLEEP_V = 30;
+  const STORE = 'cat-bounce-count';
+  const cats = [];
+  let held = null, paused = false;
+
+  function randomColor() { return 'hsl(' + Math.floor(Math.random() * 360) + ', 60%, 80%)'; }
+  function recolor() { document.body.style.background = randomColor(); }
+  recolor();
+  window.addEventListener('resize', recolor);
+
+  function save() { try { localStorage.setItem(STORE, String(cats.length)); } catch (e) {} }
+  function updateCounter() { counter.textContent = 'Cats: ' + cats.length; save(); }
+  function place(c) { c.el.style.transform = 'translate(' + c.x + 'px,' + c.y + 'px)'; }
+
+  function makeCat(x, y) {
+    const el = document.createElement('div');
+    el.className = 'cat';
+    el.textContent = '🐱';
+    el.setAttribute('role', 'img');
+    el.setAttribute('aria-label', 'cat');
+    stage.appendChild(el);
+    const c = { el, x, y, vx: (Math.random() - 0.5) * 100, vy: 0, asleep: false };
+    cats.push(c);
+    place(c);
+    updateCounter();
+    return c;
+  }
+  function removeCat(c) {
+    const i = cats.indexOf(c);
+    if (i < 0) return;
+    cats.splice(i, 1);
+    c.el.remove();
+    if (held === c) held = null;
+    updateCounter();
+  }
+  function spawnTop(n) {
+    const W = stage.clientWidth;
+    for (let i = 0; i < n; i++) makeCat(Math.random() * (W - SIZE), -SIZE - Math.random() * 200);
+  }
+  function spawnInitial(n) {
+    const W = stage.clientWidth;
+    for (let i = 0; i < n; i++) makeCat(60 + (i / n) * (W - SIZE - 120) + Math.random() * 20, Math.random() * 80);
+  }
+  function rain() { spawnTop(6); }
+  function reset() {
+    while (cats.length) removeCat(cats[cats.length - 1]);
+    try { localStorage.removeItem(STORE); } catch (e) {}
+    spawnInitial(3);
+  }
+
+  let saved = 0;
+  try { saved = parseInt(localStorage.getItem(STORE) || '0', 10) || 0; } catch (e) {}
+  spawnInitial(Math.max(3, saved));
+
+  rainBtn.addEventListener('click', rain);
+  resetBtn.addEventListener('click', reset);
+  pauseBtn.addEventListener('click', function () {
+    paused = !paused;
+    pauseBtn.textContent = paused ? 'Resume' : 'Pause';
+    last = performance.now();
+  });
+  window.addEventListener('keydown', function (e) {
+    if (e.code === 'Space' || e.key === ' ') { e.preventDefault(); rain(); }
+  });
+  stage.addEventListener('dblclick', function (e) {
+    const el = e.target.closest('.cat');
+    if (el) removeCat(cats.find(c => c.el === el));
+  });
+
+  // drag and throw
+  let lastPointer = null;
+  stage.addEventListener('mousedown', function (e) {
+    const el = e.target.closest('.cat');
+    if (!el) return;
+    held = cats.find(c => c.el === el);
+    held.el.classList.add('held');
+    held.vx = held.vy = 0; held.asleep = false;
+    lastPointer = { x: e.clientX, y: e.clientY, t: performance.now() };
+    e.preventDefault();
+  });
+  window.addEventListener('mousemove', function (e) {
+    if (!held) return;
+    const now = performance.now();
+    const dt = Math.max((now - lastPointer.t) / 1000, 0.001);
+    const nx = e.clientX - SIZE / 2, ny = e.clientY - SIZE / 2;
+    held.vx = (nx - held.x) / dt;
+    held.vy = (ny - held.y) / dt;
+    held.x = nx; held.y = ny;
+    lastPointer = { x: e.clientX, y: e.clientY, t: now };
+    place(held);
+  });
+  window.addEventListener('mouseup', function () {
+    if (!held) return;
+    if (performance.now() - lastPointer.t > 100) held.vx = held.vy = 0;
+    held.el.classList.remove('held');
+    held = null;
+  });
+
+  function separate(W, H) {
+    // simple positional separation so resting cats never overlap
+    for (let i = 0; i < cats.length; i++) for (let j = i + 1; j < cats.length; j++) {
+      const a = cats[i], b = cats[j];
+      if (a === held || b === held) continue;
+      const dx = (b.x - a.x), dy = (b.y - a.y);
+      const ox = SIZE - Math.abs(dx), oy = SIZE - Math.abs(dy);
+      if (ox <= 0 || oy <= 0) continue;
+      if (ox < oy) {
+        const s = dx >= 0 ? 1 : -1;
+        a.x -= s * ox / 2; b.x += s * ox / 2;
+        const t = a.vx; a.vx = b.vx * RESTITUTION; b.vx = t * RESTITUTION;
+      } else {
+        const s = dy >= 0 ? 1 : -1;
+        a.y -= s * oy / 2; b.y += s * oy / 2;
+        const t = a.vy; a.vy = b.vy * RESTITUTION; b.vy = t * RESTITUTION;
+      }
+      a.asleep = b.asleep = false;
+      a.x = Math.min(Math.max(a.x, 0), W - SIZE); b.x = Math.min(Math.max(b.x, 0), W - SIZE);
+      a.y = Math.min(a.y, H - SIZE); b.y = Math.min(b.y, H - SIZE);
+    }
+  }
+
+  let last = performance.now();
+  function tick(now) {
+    let dt = (now - last) / 1000; last = now;
+    if (dt > 0.05) dt = 0.05;
+    if (!paused) {
+      const W = stage.clientWidth, H = stage.clientHeight;
+      for (const c of cats) {
+        if (c === held || c.asleep) continue;
+        c.vy += GRAVITY * dt;
+        c.x += c.vx * dt; c.y += c.vy * dt;
+        if (c.y + SIZE >= H) {
+          c.y = H - SIZE;
+          c.vy = -Math.abs(c.vy) * RESTITUTION;
+          c.vx *= FRICTION;
+          if (Math.abs(c.vy) < 120) c.vy = 0;
+          if (c.vy === 0 && Math.abs(c.vx) < SLEEP_V) { c.vx = 0; c.asleep = true; }
+        }
+        if (c.y < -H) { c.y = -H; c.vy = 0; }
+        if (c.x < 0) { c.x = 0; c.vx = Math.abs(c.vx) * RESTITUTION; }
+        if (c.x + SIZE > W) { c.x = W - SIZE; c.vx = -Math.abs(c.vx) * RESTITUTION; }
+      }
+      separate(W, H);
+      for (const c of cats) place(c);
+    }
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+})();
+</script>
+</body>
+</html>

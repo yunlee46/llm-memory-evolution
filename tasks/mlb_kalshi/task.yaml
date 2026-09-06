@@ -1,0 +1,4 @@
+artifact: {filename: model.py, lang: python}
+mock_reply: tasks/mlb_kalshi/reference/model.py
+domain_hint: "asked to write a small offline data-modelling script"
+practice_hint: "planning, output discipline, defensive coding, verifying requirements, data hygiene, leakage avoidance, numerical robustness, determinism"
